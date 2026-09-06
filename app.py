@@ -230,7 +230,6 @@ def protect_owner_routes():
 
 def secrets_equal(provided: str, expected: str) -> bool:
     import hmac
-
     a = (provided or "").encode("utf-8")
     b = (expected or "").encode("utf-8")
     if len(a) != len(b):
@@ -269,13 +268,11 @@ def send_smtp(to_email: str, subject: str, body: str) -> None:
     tls_raw = _env("SMTP_TLS") or "true"
     use_tls = tls_raw.lower() in {"1", "true", "yes", "on"}
     from_name = _env("FROM_NAME")
-
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = formataddr((from_name, from_email)) if from_name else from_email
     msg["To"] = to_email
     msg.set_content(body)
-
     with smtplib.SMTP(host, port, timeout=20) as smtp:
         if use_tls:
             smtp.starttls()
@@ -419,7 +416,6 @@ def create_followup_draft(conn: sqlite3.Connection, quote: sqlite3.Row) -> None:
     except sqlite3.IntegrityError:
         conn.rollback()
         return
-
     # Optional LLM body replacement (sync ≤3s). Never blocks if already timed out conceptually.
     if llm_configured():
         llm_body = maybe_llm_followup_body(quote, timeout=3.0)
@@ -479,7 +475,6 @@ def record_open_side_effects(quote_id: int, ip: str | None, ua: str | None) -> b
             quote = conn.execute("SELECT * FROM quotes WHERE id = ?", (quote_id,)).fetchone()
             send_owner_open_alert(quote)
             return True
-
         # Subsequent open: log + increment count, no re-alert / no second follow-up
         conn.execute(
             "UPDATE quotes SET open_count = open_count + 1 WHERE id = ?",
@@ -526,662 +521,341 @@ def handle_open_beacon(quote: sqlite3.Row) -> None:
 def health():
 
     return jsonify(
-
         {
-
             "status": "ok",
-
             "smtp_configured": smtp_configured(),
-
             "llm_configured": llm_configured(),
-
         }
-
     )
-
-
 
 @app.route("/login", methods=["GET", "POST"])
 
 def login():
 
     nxt = _safe_next(request.values.get("next"))
-
     if not owner_password():
-
         return redirect(nxt)
-
     if session.get("owner"):
-
         return redirect(nxt)
-
     if request.method == "POST":
-
         provided = request.form.get("password") or ""
-
         if secrets_equal(provided, owner_password()):
-
             session["owner"] = True
-
             return redirect(nxt)
-
         flash("Incorrect password.", "error")
-
     return render_template("login.html", next=nxt, public=True)
-
-
 
 @app.get("/logout")
 
 def logout():
 
     session.clear()
-
     return redirect(url_for("login"))
-
-
 
 @app.get("/")
 
 def index():
 
     rows = get_db().execute(
-
         """
-
         SELECT q.*, f.status AS followup_status
-
         FROM quotes q
-
         LEFT JOIN followups f ON f.quote_id = q.id
-
         ORDER BY q.id DESC
-
         """
-
     ).fetchall()
-
     return render_template("index.html", quotes=rows)
-
-
 
 @app.route("/quotes/new", methods=["GET", "POST"])
 
 def new_quote():
 
     if request.method == "GET":
-
         return render_template("new_quote.html")
-
-
-
     title = (request.form.get("title") or "").strip()
-
     prospect_name = (request.form.get("prospect_name") or "").strip()
-
     prospect_email = (request.form.get("prospect_email") or "").strip()
-
     notes = (request.form.get("notes") or "").strip() or None
-
     upload = request.files.get("file")
-
-
-
     if not title or not prospect_name or not prospect_email:
-
         flash("Title, prospect name, and prospect email are required.", "error")
-
         return render_template("new_quote.html"), 400
-
     if not valid_email(prospect_email):
-
         flash("Prospect email looks invalid.", "error")
-
         return render_template("new_quote.html"), 400
-
     if upload is None or not upload.filename:
-
         flash("Upload one PDF or HTML file.", "error")
-
         return render_template("new_quote.html"), 400
-
-
-
     filename = secure_filename(upload.filename)
-
     ext = Path(filename).suffix.lower()
-
     kind = ALLOWED_EXT.get(ext)
-
     if not kind:
-
         flash("Only PDF or HTML uploads are allowed.", "error")
-
         return render_template("new_quote.html"), 400
-
-
-
     token = secrets.token_hex(32)
-
     stored_name = f"{token}{ext}"
-
     dest = upload_dir() / stored_name
-
     upload.save(dest)
-
-
-
     now = utc_now_iso()
-
     conn = get_db()
-
     cur = conn.execute(
-
         """
-
         INSERT INTO quotes (
-
             title, prospect_name, prospect_email, notes, token,
-
             file_path, file_kind, status, open_count, opened_at, link_sent_at, created_at
-
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'link_ready', 0, NULL, NULL, ?)
-
         """,
-
         (title, prospect_name, prospect_email, notes, token, str(dest), kind, now),
-
     )
-
     conn.commit()
-
     quote_id = cur.lastrowid
-
     flash("Quote created. Copy the tracked link to share.", "ok")
-
     return redirect(url_for("quote_detail", quote_id=quote_id))
-
-
 
 @app.get("/quotes/<int:quote_id>")
 
 def quote_detail(quote_id: int):
 
     quote = get_quote(quote_id)
-
     if quote is None:
-
         abort(404)
-
     followup = get_followup(quote_id)
-
     opens = (
-
         get_db()
-
         .execute(
-
             "SELECT * FROM opens WHERE quote_id = ? ORDER BY id DESC LIMIT 50",
-
             (quote_id,),
-
         )
-
         .fetchall()
-
     )
-
     link = tracked_url(quote["token"])
-
     return render_template(
-
         "quote.html",
-
         quote=quote,
-
         followup=followup,
-
         opens=opens,
-
         tracked_link=link,
-
         suggested_subject=suggested_send_subject(quote),
-
         suggested_body=suggested_send_body(quote),
-
     )
-
-
 
 @app.post("/quotes/<int:quote_id>/mark-sent")
 
 def mark_sent(quote_id: int):
 
     quote = get_quote(quote_id)
-
     if quote is None:
-
         abort(404)
-
     if quote["status"] in ("link_ready", "draft"):
-
         get_db().execute(
-
             "UPDATE quotes SET status = 'sent', link_sent_at = ? WHERE id = ?",
-
             (utc_now_iso(), quote_id),
-
         )
-
         get_db().commit()
-
         flash("Marked as sent.", "ok")
-
     else:
-
         flash("Status unchanged.", "ok")
-
     return redirect(url_for("quote_detail", quote_id=quote_id))
-
-
 
 @app.post("/quotes/<int:quote_id>/send-link")
 
 def send_link(quote_id: int):
 
     quote = get_quote(quote_id)
-
     if quote is None:
-
         abort(404)
-
     if not smtp_configured():
-
         flash("SMTP is not configured.", "error")
-
         return redirect(url_for("quote_detail", quote_id=quote_id))
-
     if quote["link_sent_at"]:
-
         flash("Link email already sent once.", "error")
-
         return redirect(url_for("quote_detail", quote_id=quote_id))
-
     try:
-
         send_smtp(
-
             quote["prospect_email"],
-
             suggested_send_subject(quote),
-
             suggested_send_body(quote),
-
         )
-
         get_db().execute(
-
             """
-
             UPDATE quotes SET status = CASE
-
                 WHEN status IN ('link_ready', 'draft') THEN 'sent'
-
                 ELSE status
-
             END, link_sent_at = ? WHERE id = ?
-
             """,
-
             (utc_now_iso(), quote_id),
-
         )
-
         get_db().commit()
-
         flash("Link emailed to prospect.", "ok")
-
     except Exception as exc:  # noqa: BLE001
-
         app.logger.warning("send-link failed quote_id=%s: %s", quote_id, type(exc).__name__)
-
         flash("Could not send email. Check SMTP settings.", "error")
-
     return redirect(url_for("quote_detail", quote_id=quote_id))
-
-
 
 @app.post("/quotes/<int:quote_id>/skip")
 
 def skip_quote(quote_id: int):
 
     quote = get_quote(quote_id)
-
     if quote is None:
-
         abort(404)
-
     if quote["status"] not in ("followup_sent", "skipped"):
-
         get_db().execute(
-
             "UPDATE quotes SET status = 'skipped' WHERE id = ?",
-
             (quote_id,),
-
         )
-
         get_db().commit()
-
         flash("Quote skipped.", "ok")
-
     return redirect(url_for("quote_detail", quote_id=quote_id))
-
-
 
 @app.post("/quotes/<int:quote_id>/followup")
 
 def followup_action(quote_id: int):
 
     quote = get_quote(quote_id)
-
     if quote is None:
-
         abort(404)
-
     followup = get_followup(quote_id)
-
     if followup is None:
-
         flash("No follow-up draft yet.", "error")
-
         return redirect(url_for("quote_detail", quote_id=quote_id))
-
-
-
     action = (request.form.get("action") or "").strip()
-
     conn = get_db()
-
-
-
     if action == "save":
-
         subject = (request.form.get("subject") or "").strip()
-
         body = (request.form.get("body") or "").strip()
-
         if not subject or not body:
-
             flash("Subject and body are required.", "error")
-
             return redirect(url_for("quote_detail", quote_id=quote_id))
-
         if followup["status"] == "queued":
-
             conn.execute(
-
                 "UPDATE followups SET subject = ?, body = ? WHERE id = ?",
-
                 (subject, body, followup["id"]),
-
             )
-
             conn.commit()
-
             flash("Draft saved.", "ok")
-
         return redirect(url_for("quote_detail", quote_id=quote_id))
-
-
-
     if action == "approve_send":
-
         if followup["status"] == "sent" or quote["status"] == "followup_sent":
-
             flash("Follow-up already sent.", "ok")
-
             return redirect(url_for("quote_detail", quote_id=quote_id))
-
         if not smtp_configured():
-
             flash("SMTP is required to approve & send.", "error")
-
             return redirect(url_for("quote_detail", quote_id=quote_id))
-
         subject = (request.form.get("subject") or followup["subject"]).strip()
-
         body = (request.form.get("body") or followup["body"]).strip()
-
         try:
-
             send_smtp(quote["prospect_email"], subject, body)
-
             now = utc_now_iso()
-
             conn.execute(
-
                 """
-
                 UPDATE followups SET subject = ?, body = ?, status = 'sent', sent_at = ?
-
                 WHERE id = ? AND status = 'queued'
-
                 """,
-
                 (subject, body, now, followup["id"]),
-
             )
-
             conn.execute(
-
                 "UPDATE quotes SET status = 'followup_sent' WHERE id = ?",
-
                 (quote_id,),
-
             )
-
             conn.commit()
-
             flash("Follow-up sent.", "ok")
-
         except Exception as exc:  # noqa: BLE001
-
             app.logger.warning("approve-send failed quote_id=%s: %s", quote_id, type(exc).__name__)
-
             flash("Could not send follow-up. Check SMTP settings.", "error")
-
         return redirect(url_for("quote_detail", quote_id=quote_id))
-
-
-
     if action == "mark_sent":
-
         if followup["status"] == "sent" or quote["status"] == "followup_sent":
-
             flash("Follow-up already marked sent.", "ok")
-
             return redirect(url_for("quote_detail", quote_id=quote_id))
-
         now = utc_now_iso()
-
         subject = (request.form.get("subject") or followup["subject"]).strip()
-
         body = (request.form.get("body") or followup["body"]).strip()
-
         conn.execute(
-
             """
-
             UPDATE followups SET subject = ?, body = ?, status = 'sent', sent_at = ?
-
             WHERE id = ? AND status IN ('queued', 'skipped')
-
             """,
-
             (subject, body, now, followup["id"]),
-
         )
-
         # Also allow from queued
-
         if conn.total_changes == 0:
-
             conn.execute(
-
                 """
-
                 UPDATE followups SET subject = ?, body = ?, status = 'sent', sent_at = ?
-
                 WHERE id = ?
-
                 """,
-
                 (subject, body, now, followup["id"]),
-
             )
-
         conn.execute(
-
             "UPDATE quotes SET status = 'followup_sent' WHERE id = ?",
-
             (quote_id,),
-
         )
-
         conn.commit()
-
         flash("Follow-up marked sent.", "ok")
-
         return redirect(url_for("quote_detail", quote_id=quote_id))
-
-
-
     if action == "skip":
-
         if followup["status"] == "sent":
-
             flash("Follow-up already sent; cannot skip.", "error")
-
             return redirect(url_for("quote_detail", quote_id=quote_id))
-
         conn.execute(
-
             "UPDATE followups SET status = 'skipped' WHERE id = ? AND status = 'queued'",
-
             (followup["id"],),
-
         )
-
         conn.execute(
-
             "UPDATE quotes SET status = 'skipped' WHERE id = ? AND status != 'followup_sent'",
-
             (quote_id,),
-
         )
-
         conn.commit()
-
         flash("Follow-up skipped.", "ok")
-
         return redirect(url_for("quote_detail", quote_id=quote_id))
-
-
-
     flash("Unknown action.", "error")
-
     return redirect(url_for("quote_detail", quote_id=quote_id))
-
-
 
 @app.get("/v/<token>")
 
 def public_view(token: str):
 
     quote = get_quote_by_token(token)
-
     if quote is None:
-
         abort(404)
-
     handle_open_beacon(quote)
-
-
-
     path = Path(quote["file_path"])
-
     if not path.is_file():
-
         abort(404)
-
-
-
     if quote["file_kind"] == "pdf":
-
         data = path.read_bytes()
-
         return Response(
-
             data,
-
             mimetype="application/pdf",
-
             headers={
-
                 "Content-Disposition": f'inline; filename="{path.name}"',
-
             },
-
         )
-
-
-
     # HTML: render inside minimal chrome
-
     try:
-
         html_body = path.read_text(encoding="utf-8", errors="replace")
-
     except OSError:
-
         abort(404)
-
     # Strip outer html/body if present for embedding — keep as-is in iframe-like chrome
-
     return render_template(
-
         "public_html.html",
-
         quote=quote,
-
         html_content=html_body,
-
         business_name=_env("BUSINESS_NAME"),
-
         public=True,
-
         pixel_url=url_for("tracking_pixel", token=token),
-
     )
-
-
 
 @app.get("/t/<token>.gif")
 
 def tracking_pixel(token: str):
 
     quote = get_quote_by_token(token)
-
     if quote is None:
-
         abort(404)
-
     handle_open_beacon(quote)
-
     return Response(PIXEL_GIF, mimetype="image/gif")
-
-
 
 @app.errorhandler(404)
 
@@ -1190,7 +864,6 @@ def not_found(_e):
     return render_template("404.html", public=True), 404
 
 init_db()
-
 
 if __name__ == "__main__":
     port = int(_env("PORT") or "8080")
