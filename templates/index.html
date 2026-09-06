@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Quotes · OpenPing{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Quotes</h1>
+  <p class="lede">Newest first. Track opens and stage one follow-up.</p>
+</div>
+<p><a class="btn" href="{{ url_for('new_quote') }}">New quote</a></p>
+{% if not quotes %}
+<p class="empty">No quotes yet. Create one and share the tracked link.</p>
+{% else %}
+<div class="card table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Prospect</th>
+        <th>Status</th>
+        <th>Opened</th>
+        <th>Follow-up</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for q in quotes %}
+      <tr>
+        <td><a href="{{ url_for('quote_detail', quote_id=q.id) }}">{{ q.title }}</a></td>
+        <td>{{ q.prospect_name }}</td>
+        <td><span class="badge badge-{{ q.status }}">{{ q.status }}</span></td>
+        <td>{% if q.opened_at %}{{ q.opened_at }}{% else %}—{% endif %}</td>
+        <td>{% if q.followup_status %}<span class="badge badge-{{ q.followup_status }}">{{ q.followup_status }}</span>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

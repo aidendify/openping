@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Log in · OpenPing{% endblock %}
+{% block content %}
+<section class="card login-card">
+  <h1>Log in</h1>
+  <p class="lede">Owner password for this OpenPing instance.</p>
+  <form method="post" action="{{ url_for('login') }}" class="stack">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>Password <input type="password" name="password" required autofocus></label>
+    <button type="submit" class="btn">Log in</button>
+  </form>
+</section>
+{% endblock %}

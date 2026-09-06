@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}New quote · OpenPing{% endblock %}
+{% block content %}
+<div class="page-head">
+  <p class="crumb"><a href="{{ url_for('index') }}">Quotes</a> / New</p>
+  <h1>New quote</h1>
+  <p class="lede">Upload one PDF or HTML file (max 10 MB).</p>
+</div>
+<section class="card">
+  <form method="post" enctype="multipart/form-data" class="stack">
+    <label>Title <input type="text" name="title" required></label>
+    <label>Prospect name <input type="text" name="prospect_name" required></label>
+    <label>Prospect email <input type="email" name="prospect_email" required></label>
+    <label>Notes (internal, optional) <textarea name="notes" rows="3"></textarea></label>
+    <label>Quote file (PDF or HTML) <input type="file" name="file" accept=".pdf,.html,.htm,application/pdf,text/html" required></label>
+    <button type="submit" class="btn">Create tracked link</button>
+  </form>
+</section>
+{% endblock %}
