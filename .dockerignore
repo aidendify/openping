@@ -1,0 +1,9 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.db
+.env
+PRD.md
+test_app.py
+uploads/
