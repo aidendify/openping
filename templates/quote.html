@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}{{ quote.title }} · OpenPing{% endblock %}
+{% block content %}
+<div class="page-head">
+  <p class="crumb"><a href="{{ url_for('index') }}">Quotes</a> / {{ quote.title }}</p>
+  <h1>{{ quote.title }}</h1>
+  <p class="lede">{{ quote.prospect_name }} &lt;{{ quote.prospect_email }}&gt;</p>
+</div>
+
+<dl class="facts">
+  <div>
+    <dt>Status</dt>
+    <dd><span class="badge badge-{{ quote.status }}">{{ quote.status }}</span></dd>
+  </div>
+  <div>
+    <dt>Opened</dt>
+    <dd>{% if quote.opened_at %}{{ quote.opened_at }} ({{ quote.open_count }}×){% else %}Not yet{% endif %}</dd>
+  </div>
+  <div>
+    <dt>File</dt>
+    <dd>{{ quote.file_kind|upper }}</dd>
+  </div>
+</dl>
+
+<section class="card">
+  <h2>Tracked link</h2>
+  <p class="subject"><code id="tracked-link">{{ tracked_link }}</code></p>
+  <div class="status-row">
+    <button type="button" class="btn btn-quiet" onclick="copyText(document.getElementById('tracked-link').textContent, this)">Copy link</button>
+    <button type="button" class="btn btn-quiet" onclick="copyText(document.getElementById('suggested-email').textContent, this)">Copy suggested send email</button>
+    {% if smtp_configured and not quote.link_sent_at %}
+    <form method="post" action="{{ url_for('send_link', quote_id=quote.id) }}" style="display:inline">
+      <button type="submit" class="btn">Email link to prospect</button>
+    </form>
+    {% endif %}
+    {% if quote.status in ('link_ready', 'draft') %}
+    <form method="post" action="{{ url_for('mark_sent', quote_id=quote.id) }}" style="display:inline">
+      <button type="submit" class="btn btn-quiet">Mark sent</button>
+    </form>
+    {% endif %}
+    {% if quote.status not in ('followup_sent', 'skipped') %}
+    <form method="post" action="{{ url_for('skip_quote', quote_id=quote.id) }}" style="display:inline">
+      <button type="submit" class="btn btn-quiet">Skip</button>
+    </form>
+    {% endif %}
+  </div>
+  <pre class="body" id="suggested-email" hidden>Subject: {{ suggested_subject }}
+
+{{ suggested_body }}</pre>
+  <details style="margin-top:0.75rem">
+    <summary class="hint">Suggested send email (preview)</summary>
+    <p class="subject"><strong>{{ suggested_subject }}</strong></p>
+    <pre class="body">{{ suggested_body }}</pre>
+  </details>
+  {% if quote.notes %}
+  <p class="hint" style="margin-top:0.75rem">Notes: {{ quote.notes }}</p>
+  {% endif %}
+</section>
+
+{% if followup %}
+<section class="card">
+  <div class="seq-head">
+    <h2>Follow-up draft</h2>
+    <span class="badge badge-{{ followup.status }}">{{ followup.status }}</span>
+  </div>
+  <p class="hint">Exactly one follow-up per quote. Human approve-to-send only — never auto-sent.</p>
+  <form method="post" action="{{ url_for('followup_action', quote_id=quote.id) }}" class="stack">
+    <label>Subject
+      <input type="text" name="subject" value="{{ followup.subject }}" {% if followup.status != 'queued' %}readonly{% endif %}>
+    </label>
+    <label>Body
+      <textarea name="body" rows="10" {% if followup.status != 'queued' %}readonly{% endif %}>{{ followup.body }}</textarea>
+    </label>
+    <div class="seq-actions">
+      {% if followup.status == 'queued' %}
+      <button type="submit" name="action" value="save" class="btn btn-quiet">Save edits</button>
+      <button type="button" class="btn btn-quiet" onclick="copyText('Subject: ' + this.form.subject.value + '\n\n' + this.form.body.value, this)">Copy</button>
+      {% if smtp_configured %}
+      <button type="submit" name="action" value="approve_send" class="btn">Approve &amp; send</button>
+      {% else %}
+      <button type="button" class="btn" disabled title="SMTP required">Approve &amp; send</button>
+      {% endif %}
+      <button type="submit" name="action" value="mark_sent" class="btn btn-quiet">Mark sent</button>
+      <button type="submit" name="action" value="skip" class="btn btn-quiet">Skip follow-up</button>
+      {% else %}
+      <button type="button" class="btn btn-quiet" onclick="copyText('Subject: ' + this.form.subject.value + '\n\n' + this.form.body.value, this)">Copy</button>
+      {% endif %}
+    </div>
+  </form>
+</section>
+{% else %}
+<section class="card">
+  <h2>Follow-up draft</h2>
+  <p class="empty">No draft yet. It appears after the prospect opens the tracked link.</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Open history</h2>
+  {% if not opens %}
+  <p class="empty">No opens recorded.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>When</th><th>First?</th><th>IP</th><th>User-Agent</th></tr>
+      </thead>
+      <tbody>
+        {% for o in opens %}
+        <tr>
+          <td>{{ o.at }}</td>
+          <td>{% if o.is_first %}yes{% else %}—{% endif %}</td>
+          <td>{{ o.ip or '—' }}</td>
+          <td class="hint">{{ o.user_agent or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
